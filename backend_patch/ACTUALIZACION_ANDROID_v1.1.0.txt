@@ -1,0 +1,23 @@
+HERMANOS LIMPIEZA — ANDROID v1.1.0
+ACTUALIZACIÓN DESDE v1.0.0
+
+1. Haz respaldo del backend actual.
+2. Reemplaza en el hosting el archivo mobile_api.php por backend_patch/mobile_api.php.
+3. NO ejecutes nuevamente 01_mobile_api_tokens.sql si ya instalaste v1.0.0.
+4. Esta actualización NO requiere SQL nuevo.
+5. Sube/commit al repositorio GitHub los archivos de Android v1.1.0.
+6. Conserva la Repository Variable API_BASE_URL.
+7. Ejecuta el workflow Build Android APK.
+
+NUEVOS ENDPOINTS:
+- GET  mobile_api.php?action=me
+- POST mobile_api.php?action=appointment_update
+
+EDICIÓN DE SERVICIOS:
+- Solo role=admin puede editar desde el API móvil.
+- Si cambia el colaborador, el estado vuelve a assigned_unconfirmed.
+- Se registra historial de la edición.
+
+CACHÉ:
+- No requiere configuración del servidor.
+- Android usa cacheDir local y sincroniza después con Chatwoot.

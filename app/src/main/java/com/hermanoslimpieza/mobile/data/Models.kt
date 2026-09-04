@@ -1,7 +1,6 @@
 package com.hermanoslimpieza.mobile.data
 
 import com.google.gson.JsonObject
-import com.google.gson.annotations.SerializedName
 
 data class UserDto(
     val id: Long = 0,
@@ -18,16 +17,19 @@ data class LoginResponse(
     val error: String? = null
 )
 
+data class MeResponse(
+    val ok: Boolean = false,
+    val user: UserDto? = null,
+    val error: String? = null
+)
+
 data class BasicResponse(
     val ok: Boolean = false,
     val error: String? = null,
     val warning: String? = null
 )
 
-data class CollaboratorDto(
-    val id: Long = 0,
-    val name: String = ""
-)
+data class CollaboratorDto(val id: Long = 0, val name: String = "")
 
 data class CollaboratorsResponse(
     val ok: Boolean = false,
@@ -88,12 +90,17 @@ data class CreateAppointmentResponse(
 data class ChatDto(
     val jid: String = "",
     val name: String = "",
+    val contact_name: String? = null,
     val phone: String? = null,
-    @SerializedName("avatar_url") val avatar: String? = null,
+    val avatar: String? = null,
+    val avatar_url: String? = null,
     val last_message: String? = null,
     val timestamp: Long = 0,
     val unread: Int = 0
-)
+) {
+    fun resolvedAvatar(): String? = avatar_url?.takeIf { it.isNotBlank() }
+        ?: avatar?.takeIf { it.isNotBlank() }
+}
 
 data class ChatsResponse(
     val ok: Boolean = false,
@@ -106,15 +113,23 @@ data class MessageDto(
     val text: String? = null,
     val from_me: Boolean = false,
     val timestamp: Long = 0,
+    val time: String? = null,
     val type: String? = null,
-    @SerializedName("has_media") val media: Boolean? = false
-)
+    val media: Boolean? = false,
+    val has_media: Boolean? = false
+) {
+    fun hasMedia(): Boolean = media == true || has_media == true
+}
 
 data class ChatContextDto(
     val name: String? = null,
     val phone: String? = null,
-    val avatar: String? = null
-)
+    val avatar: String? = null,
+    val avatar_url: String? = null
+) {
+    fun resolvedAvatar(): String? = avatar_url?.takeIf { it.isNotBlank() }
+        ?: avatar?.takeIf { it.isNotBlank() }
+}
 
 data class MessagesResponse(
     val ok: Boolean = false,

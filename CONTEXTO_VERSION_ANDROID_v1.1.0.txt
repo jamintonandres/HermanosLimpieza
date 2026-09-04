@@ -1,0 +1,248 @@
+HERMANOS LIMPIEZA — ANDROID
+CONTEXTO_VERSION_ANDROID_v1.1.0
+Fecha: 2026-08-23
+
+======================================================================
+1. VERSIÓN BASE
+======================================================================
+
+Android anterior: v1.0.0
+Backend web base: Hermanos Limpieza v1.13.14 COMPLETA
+Backend móvil anterior: mobile_api.php v1.0
+
+======================================================================
+2. OBJETIVO DE LA VERSIÓN
+======================================================================
+
+Mejorar significativamente la experiencia móvil y acercar el CRM Android
+al CRM de la plataforma web, manteniendo la misma fuente de datos Chatwoot.
+
+La interfaz adopta la identidad visual:
+- Azul principal: #13287E
+- Amarillo de acción/acento: #FFF323
+
+El diseño se inspira en aplicaciones modernas de delivery/servicios de
+Colombia: jerarquía visual fuerte, tarjetas amplias, acciones grandes,
+esquinas redondeadas, navegación inferior y alta legibilidad. No intenta
+copiar una interfaz externa de forma literal.
+
+======================================================================
+3. CAMBIOS FUNCIONALES
+======================================================================
+
+CRM:
+- Lista de conversaciones rediseñada.
+- Avatar del contacto.
+- Nombre, último mensaje, cantidad no leída y hora/fecha del último mensaje.
+- Cabecera de chat más cercana al CRM web.
+- Hora visible debajo de cada mensaje.
+- Mensajes propios en azul #13287E.
+- Mensajes entrantes en superficie blanca.
+- Botón Analizar conservado.
+- Botón Crear servicio aparece después de una extracción IA válida.
+
+RENDIMIENTO DEL CHAT:
+- Nuevo ChatCache persistente en cacheDir del dispositivo.
+- La lista del CRM se muestra desde caché antes de terminar la llamada a Chatwoot.
+- Al abrir una conversación se muestran primero los mensajes almacenados.
+- Luego se sincroniza silenciosamente con Chatwoot.
+- Envío optimista: el mensaje aparece inmediatamente en pantalla y luego se
+  confirma con el servidor.
+- Si el envío falla, el mensaje optimista se elimina y se informa el error.
+- Chatwoot sigue siendo la fuente de verdad; el caché Android es descartable.
+
+SERVICIOS:
+- Continúa permitiendo crear servicios.
+- Se agrega edición completa desde Android para role=admin.
+- El detalle del servicio muestra botón Editar para administrador.
+- Se pueden cambiar cliente, teléfono, dirección, ciudad, descripción,
+  valor, colaborador, fecha, horario y notas.
+- Se mantiene control de conflicto de colaborador/horario.
+- Si cambia el colaborador, el servicio vuelve a assigned_unconfirmed.
+- La edición se registra en appointment_history.
+
+USUARIO:
+- Nuevo endpoint /?action=me para recuperar el rol de una sesión móvil ya
+  existente, permitiendo saber que el usuario es admin aunque la app se haya
+  reabierto sin volver a iniciar sesión.
+
+======================================================================
+4. CAMBIOS DE DISEÑO
+======================================================================
+
+Paleta:
+- BrandBlue       #13287E
+- BrandYellow     #FFF323
+- Fondo           #F5F6FA
+- Azul suave      #E8ECFF
+- Texto principal #111827
+
+Patrones:
+- Top bars azules.
+- Botones principales amarillos con texto azul.
+- Tarjetas con esquinas 18–24dp.
+- Navegación inferior Inicio / Agenda / CRM / Nuevo.
+- Indicador activo amarillo.
+- Inicio con métricas rápidas de servicios del día.
+- Formularios con campos redondeados y acción principal destacada.
+
+======================================================================
+5. ARCHIVOS AGREGADOS
+======================================================================
+
+app/src/main/java/com/hermanoslimpieza/mobile/data/ChatCache.kt
+backend_patch/ACTUALIZACION_ANDROID_v1.1.0.txt
+CONTEXTO_VERSION_ANDROID_v1.1.0.txt
+
+======================================================================
+6. ARCHIVOS MODIFICADOS
+======================================================================
+
+app/build.gradle.kts
+app/src/main/java/com/hermanoslimpieza/mobile/HermanosApp.kt
+app/src/main/java/com/hermanoslimpieza/mobile/MainActivity.kt
+app/src/main/java/com/hermanoslimpieza/mobile/data/HermanosApi.kt
+app/src/main/java/com/hermanoslimpieza/mobile/data/Models.kt
+app/src/main/java/com/hermanoslimpieza/mobile/ui/AppViewModel.kt
+app/src/main/java/com/hermanoslimpieza/mobile/ui/AppointmentDetailScreen.kt
+app/src/main/java/com/hermanoslimpieza/mobile/ui/CalendarScreen.kt
+app/src/main/java/com/hermanoslimpieza/mobile/ui/ChatScreen.kt
+app/src/main/java/com/hermanoslimpieza/mobile/ui/CrmScreen.kt
+app/src/main/java/com/hermanoslimpieza/mobile/ui/HermanosRoot.kt
+app/src/main/java/com/hermanoslimpieza/mobile/ui/LoginScreen.kt
+app/src/main/java/com/hermanoslimpieza/mobile/ui/NewServiceScreen.kt
+app/src/main/java/com/hermanoslimpieza/mobile/ui/TodayScreen.kt
+app/src/main/java/com/hermanoslimpieza/mobile/ui/theme/Theme.kt
+app/src/main/res/values/themes.xml
+backend_patch/mobile_api.php
+README.md
+
+======================================================================
+7. ARCHIVOS ELIMINADOS
+======================================================================
+
+Ninguno funcional.
+El paquete v1.1.0 sustituye el contexto v1.0.0 por el contexto actual dentro
+del release de actualización; el paquete completo puede conservar historial.
+
+======================================================================
+8. SQL / MIGRACIONES
+======================================================================
+
+Actualización v1.0.0 -> v1.1.0:
+NO requiere SQL adicional.
+
+Instalación nueva:
+Sigue siendo obligatoria la tabla mobile_api_tokens incluida en:
+backend_patch/01_mobile_api_tokens.sql
+
+======================================================================
+9. CAMBIOS DE BACKEND MÓVIL
+======================================================================
+
+Nuevos endpoints:
+GET  mobile_api.php?action=me
+POST mobile_api.php?action=appointment_update
+
+crm_messages ahora entrega un contexto móvil enriquecido con:
+- name
+- phone
+- avatar / avatar_url
+- datos del cliente encontrado
+- últimos servicios del cliente
+
+appointment_update:
+- exclusivo para admin;
+- valida colaborador activo;
+- valida datos requeridos;
+- evita colisión de horario;
+- reutiliza/actualiza cliente por teléfono;
+- mantiene estado si no cambia colaborador;
+- cambia a assigned_unconfirmed si cambia colaborador;
+- registra appointment_history.
+
+======================================================================
+10. CHATWOOT / EVOLUTION / IA
+======================================================================
+
+Chatwoot:
+- Sigue siendo fuente de verdad de chats/mensajes/avatar/hora.
+- No se crean tablas duplicadas de conversaciones.
+
+Evolution:
+- Sin cambios en esta versión.
+
+IA:
+- Sin cambio de proveedor/modelo.
+- Continúa usando crm_analyze_conversation() del backend web.
+- El formulario de servicio conserva prellenado desde la extracción.
+
+======================================================================
+11. SEGURIDAD
+======================================================================
+
+- Los tokens siguen almacenándose como hash SHA-256 en MySQL.
+- El token real sigue cifrado por Android Keystore.
+- El caché de chat está en cacheDir, no en almacenamiento público.
+- El caché se elimina al cerrar sesión.
+- La edición de servicios se valida también en servidor como role=admin;
+  ocultar el botón en Android no es el control de seguridad principal.
+
+======================================================================
+12. COMPILACIÓN
+======================================================================
+
+versionCode: 2
+versionName: 1.1.0
+minSdk: 26
+compileSdk: 35
+Java: 17
+Kotlin: 2.0.21
+
+El workflow GitHub Actions sigue en:
+.github/workflows/android.yml
+
+Variable requerida:
+API_BASE_URL=https://dominio/ruta/
+
+======================================================================
+13. PRUEBAS REALIZADAS
+======================================================================
+
+- php -l de backend_patch/mobile_api.php: OK.
+- Revisión de firmas reales de funciones Chatwoot/IA de Hermanos Limpieza
+  v1.13.14.
+- Verificación de campos normalizados de Chatwoot: timestamp, time,
+  from_me, has_media, avatar_url.
+- Revisión estática de navegación create/edit/chat/cache.
+
+La compilación Android final debe verificarse en GitHub Actions porque este
+entorno no incluye Android SDK/Gradle de proyecto.
+
+======================================================================
+14. RIESGOS / NOTAS
+======================================================================
+
+- cacheDir puede ser eliminado por Android; esto es esperado y seguro.
+- El primer acceso a un chat sin caché sigue dependiendo de la red.
+- Multimedia avanzada (audio/foto/video inline) aún no está implementada.
+- El selector de fecha todavía usa YYYY-MM-DD; queda para una versión futura.
+- Para actualizar desde v1.0.0 hay que reemplazar mobile_api.php en el hosting.
+
+======================================================================
+15. PUNTO DE CONTINUIDAD
+======================================================================
+
+Base para próxima versión:
+Android v1.1.0 + Hermanos Limpieza web v1.13.14.
+
+Prioridades sugeridas:
+- selector visual de fecha;
+- imágenes/audio/documentos inline en CRM;
+- búsqueda de conversaciones;
+- pull-to-refresh;
+- aceptar/completar/cancelar servicios desde Android;
+- push notifications nativas;
+- cache Room si el volumen de CRM crece considerablemente.
+
+FIN

@@ -2,23 +2,29 @@ package com.hermanoslimpieza.mobile.ui
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Today
+import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.hermanoslimpieza.mobile.data.ChatCache
 import com.hermanoslimpieza.mobile.data.HermanosApi
 import com.hermanoslimpieza.mobile.data.TokenStore
+import com.hermanoslimpieza.mobile.ui.theme.BrandBlue
+import com.hermanoslimpieza.mobile.ui.theme.BrandYellow
 
 @Composable
-fun HermanosRoot(api: HermanosApi, tokenStore: TokenStore) {
-    val vm: AppViewModel = viewModel(factory = SimpleVmFactory { AppViewModel(api, tokenStore) })
+fun HermanosRoot(api: HermanosApi, tokenStore: TokenStore, chatCache: ChatCache) {
+    val vm: AppViewModel = viewModel(
+        factory = SimpleVmFactory { AppViewModel(api, tokenStore, chatCache) }
+    )
     var authenticated by remember { mutableStateOf(vm.hasSession) }
 
     if (!authenticated) {
@@ -39,14 +45,15 @@ fun HermanosRoot(api: HermanosApi, tokenStore: TokenStore) {
     val showBottom = route in listOf("today", "calendar", "crm", "new")
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             if (showBottom) {
-                NavigationBar {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp) {
                     val items = listOf(
-                        Triple("today", "Hoy", Icons.Default.Today),
-                        Triple("calendar", "Calendario", Icons.Default.CalendarMonth),
-                        Triple("crm", "CRM", Icons.Default.Chat),
-                        Triple("new", "Nuevo", Icons.Default.AddCircle)
+                        Triple("today", "Inicio", Icons.Default.Home),
+                        Triple("calendar", "Agenda", Icons.Default.CalendarMonth),
+                        Triple("crm", "CRM", Icons.Default.ChatBubble),
+                        Triple("new", "Nuevo", Icons.Default.Add)
                     )
                     items.forEach { (r, label, icon) ->
                         NavigationBarItem(
@@ -59,28 +66,26 @@ fun HermanosRoot(api: HermanosApi, tokenStore: TokenStore) {
                                 }
                             },
                             icon = { Icon(icon, label) },
-                            label = { Text(label) }
+                            label = { Text(label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = BrandBlue,
+                                selectedTextColor = BrandBlue,
+                                indicatorColor = BrandYellow
+                            )
                         )
                     }
                 }
             }
         },
         snackbarHost = {
-            val error = vm.state.error
-            if (error != null) {
-                Snackbar(
-                    action = {
-                        TextButton(onClick = vm::clearError) { Text("Cerrar") }
-                    }
-                ) { Text(error) }
+            vm.state.error?.let { error ->
+                Snackbar(action = { TextButton(onClick = vm::clearError) { Text("Cerrar") } }) {
+                    Text(error)
+                }
             }
         }
     ) { padding ->
-        NavHost(
-            navController = nav,
-            startDestination = "today",
-            modifier = Modifier.padding(padding)
-        ) {
+        NavHost(navController = nav, startDestination = "today", modifier = Modifier.padding(padding)) {
             composable("today") {
                 TodayScreen(
                     state = vm.state,
@@ -120,13 +125,17 @@ fun HermanosRoot(api: HermanosApi, tokenStore: TokenStore) {
                     defaultValue = 0
                 })
             ) { entry ->
-                NewServiceScreen(
+                ServiceFormScreen(
                     state = vm.state,
-                    initial = if (entry.arguments?.getInt("fromAi") == 1) vm.state.extracted else null,
+                    title = if (entry.arguments?.getInt("fromAi") == 1) "Servicio desde CRM" else "Nuevo servicio",
+                    initialAi = if (entry.arguments?.getInt("fromAi") == 1) vm.state.extracted else null,
+                    appointment = null,
                     onSave = { draft ->
                         vm.createAppointment(draft) { id ->
                             vm.loadAppointment(id) {
-                                nav.navigate("appointment/$id")
+                                nav.navigate("appointment/$id") {
+                                    popUpTo("new") { inclusive = true }
+                                }
                             }
                         }
                     }
@@ -138,16 +147,32 @@ fun HermanosRoot(api: HermanosApi, tokenStore: TokenStore) {
             ) {
                 AppointmentDetailScreen(
                     state = vm.state,
-                    onBack = { nav.popBackStack() }
+                    onBack = { nav.popBackStack() },
+                    onEdit = { id -> nav.navigate("edit/$id") }
+                )
+            }
+            composable(
+                "edit/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.LongType })
+            ) { entry ->
+                val id = entry.arguments?.getLong("id") ?: 0L
+                ServiceFormScreen(
+                    state = vm.state,
+                    title = "Editar servicio #$id",
+                    initialAi = null,
+                    appointment = vm.state.selectedAppointment,
+                    onBack = { nav.popBackStack() },
+                    onSave = { draft ->
+                        vm.updateAppointment(id, draft) { nav.popBackStack() }
+                    }
                 )
             }
         }
     }
 }
 
-class SimpleVmFactory<T : androidx.lifecycle.ViewModel>(
-    private val creator: () -> T
-) : androidx.lifecycle.ViewModelProvider.Factory {
+class SimpleVmFactory<T : androidx.lifecycle.ViewModel>(private val creator: () -> T) :
+    androidx.lifecycle.ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <R : androidx.lifecycle.ViewModel> create(modelClass: Class<R>): R = creator() as R
 }

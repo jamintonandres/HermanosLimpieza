@@ -12,7 +12,7 @@ class MainActivity : ComponentActivity() {
         val app = application as HermanosApp
         setContent {
             HermanosTheme {
-                HermanosRoot(app.apiClient.api, app.tokenStore)
+                HermanosRoot(app.apiClient.api, app.tokenStore, app.chatCache)
             }
         }
     }
