@@ -9,10 +9,10 @@ import com.hermanoslimpieza.mobile.data.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
-import java.time.format.DateTimeFormatter
 
 data class AppUiState(
     val loading: Boolean = false,
+    val syncingCrm: Boolean = false,
     val error: String? = null,
     val user: UserDto? = null,
     val today: List<AppointmentDto> = emptyList(),
@@ -30,7 +30,8 @@ data class AppUiState(
 
 class AppViewModel(
     private val api: HermanosApi,
-    private val tokenStore: TokenStore
+    private val tokenStore: TokenStore,
+    private val chatCache: ChatCache
 ) : ViewModel() {
     var state by mutableStateOf(AppUiState())
         private set
@@ -38,12 +39,14 @@ class AppViewModel(
     val hasSession: Boolean get() = !tokenStore.get().isNullOrBlank()
 
     private fun fail(t: Throwable) {
-        state = state.copy(loading = false, error = t.message ?: "Error de conexión.")
+        state = state.copy(
+            loading = false,
+            syncingCrm = false,
+            error = t.message ?: "Error de conexión."
+        )
     }
 
-    fun clearError() {
-        state = state.copy(error = null)
-    }
+    fun clearError() { state = state.copy(error = null) }
 
     fun login(email: String, password: String, onSuccess: () -> Unit) {
         state = state.copy(loading = true, error = null)
@@ -55,10 +58,16 @@ class AppViewModel(
                         state = state.copy(loading = false, user = r.user)
                         onSuccess()
                         refreshCore()
-                    } else {
-                        state = state.copy(loading = false, error = r.error ?: "No se pudo iniciar sesión.")
-                    }
+                    } else state = state.copy(loading = false, error = r.error ?: "No se pudo iniciar sesión.")
                 }.onFailure(::fail)
+        }
+    }
+
+    fun loadMe() {
+        viewModelScope.launch {
+            runCatching { api.me() }.onSuccess { r ->
+                if (r.ok) state = state.copy(user = r.user)
+            }
         }
     }
 
@@ -66,12 +75,14 @@ class AppViewModel(
         viewModelScope.launch {
             runCatching { api.logout() }
             tokenStore.clear()
+            chatCache.clear()
             state = AppUiState()
             onDone()
         }
     }
 
     fun refreshCore() {
+        loadMe()
         loadToday()
         loadCollaborators()
         loadCalendar(state.month)
@@ -90,19 +101,16 @@ class AppViewModel(
 
     fun loadCollaborators() {
         viewModelScope.launch {
-            runCatching { api.collaborators() }
-                .onSuccess { r ->
-                    if (r.ok) state = state.copy(collaborators = r.collaborators)
-                }
+            runCatching { api.collaborators() }.onSuccess { r ->
+                if (r.ok) state = state.copy(collaborators = r.collaborators)
+            }
         }
     }
 
     fun loadCalendar(month: YearMonth) {
-        val start = month.atDay(1)
-        val end = month.atEndOfMonth()
         state = state.copy(month = month)
         viewModelScope.launch {
-            runCatching { api.calendar(start.toString(), end.toString()) }
+            runCatching { api.calendar(month.atDay(1).toString(), month.atEndOfMonth().toString()) }
                 .onSuccess { r ->
                     if (r.ok) state = state.copy(calendar = r.appointments)
                     else state = state.copy(error = r.error)
@@ -128,49 +136,91 @@ class AppViewModel(
     }
 
     fun loadChats() {
-        state = state.copy(loading = true, error = null)
+        val cached = chatCache.loadChats()
+        state = if (cached.isNotEmpty()) {
+            state.copy(chats = cached, loading = false, syncingCrm = true, error = null)
+        } else {
+            state.copy(loading = true, syncingCrm = true, error = null)
+        }
         viewModelScope.launch {
             runCatching { api.chats() }
                 .onSuccess { r ->
-                    state = if (r.ok) state.copy(loading = false, chats = r.chats)
-                    else state.copy(loading = false, error = r.error)
+                    if (r.ok) {
+                        chatCache.saveChats(r.chats)
+                        state = state.copy(loading = false, syncingCrm = false, chats = r.chats)
+                    } else state = state.copy(loading = false, syncingCrm = false, error = r.error)
                 }.onFailure(::fail)
         }
     }
 
+    /** Abre primero el caché y sincroniza Chatwoot después. */
     fun openChat(chat: ChatDto, onLoaded: () -> Unit = {}) {
-        state = state.copy(selectedChat = chat, extracted = null, loading = true, error = null)
+        val (cachedContext, cachedMessages) = chatCache.loadMessages(chat.jid)
+        state = state.copy(
+            selectedChat = chat,
+            extracted = null,
+            messages = cachedMessages,
+            chatContext = cachedContext,
+            loading = cachedMessages.isEmpty(),
+            syncingCrm = true,
+            error = null
+        )
+        onLoaded()
+
         viewModelScope.launch {
-            runCatching { api.messages(chat.jid, 30) }
+            runCatching { api.messages(chat.jid, 50) }
                 .onSuccess { r ->
                     if (r.ok) {
+                        chatCache.saveMessages(chat.jid, r.context, r.messages)
                         state = state.copy(
                             loading = false,
+                            syncingCrm = false,
                             messages = r.messages,
                             chatContext = r.context
                         )
                         runCatching { api.markRead(chat.jid) }
-                        onLoaded()
-                    } else state = state.copy(loading = false, error = r.error)
+                    } else state = state.copy(loading = false, syncingCrm = false, error = r.error)
                 }.onFailure(::fail)
         }
     }
 
-    fun refreshChat() {
-        state.selectedChat?.let { openChat(it) }
-    }
+    fun refreshChat() { state.selectedChat?.let { openChat(it) } }
 
     fun sendMessage(text: String, onSent: () -> Unit = {}) {
         val chat = state.selectedChat ?: return
         if (text.isBlank()) return
+
+        val optimistic = MessageDto(
+            id = "local-${System.currentTimeMillis()}",
+            text = text.trim(),
+            from_me = true,
+            timestamp = System.currentTimeMillis() / 1000
+        )
+        val optimisticMessages = state.messages + optimistic
+        state = state.copy(messages = optimisticMessages)
+        chatCache.saveMessages(chat.jid, state.chatContext, optimisticMessages)
+        onSent()
+
         viewModelScope.launch {
             runCatching { api.sendMessage(chat.jid, text.trim()) }
                 .onSuccess { r ->
                     if (r.ok) {
-                        onSent()
-                        openChat(chat)
-                    } else state = state.copy(error = r.error)
-                }.onFailure(::fail)
+                        runCatching { api.messages(chat.jid, 50) }.onSuccess { fresh ->
+                            if (fresh.ok) {
+                                chatCache.saveMessages(chat.jid, fresh.context, fresh.messages)
+                                state = state.copy(messages = fresh.messages, chatContext = fresh.context)
+                            }
+                        }
+                    } else {
+                        state = state.copy(
+                            messages = state.messages.filterNot { it.id == optimistic.id },
+                            error = r.error ?: "No se pudo enviar el mensaje."
+                        )
+                    }
+                }.onFailure { t ->
+                    state = state.copy(messages = state.messages.filterNot { it.id == optimistic.id })
+                    fail(t)
+                }
         }
     }
 
@@ -187,32 +237,43 @@ class AppViewModel(
         }
     }
 
-    fun createAppointment(
-        draft: ServiceDraft,
-        onSuccess: (Long) -> Unit
-    ) {
+    fun createAppointment(draft: ServiceDraft, onSuccess: (Long) -> Unit) {
         state = state.copy(loading = true, error = null)
         viewModelScope.launch {
             runCatching {
                 api.createAppointment(
-                    phone = draft.phone,
-                    countryCode = draft.countryCode,
-                    clientName = draft.clientName,
-                    serviceDescription = draft.serviceDescription,
-                    assignedUserId = draft.assignedUserId,
-                    scheduledDate = draft.date,
-                    timeSlot = draft.timeSlot,
-                    price = draft.price,
-                    address = draft.address,
-                    city = draft.city,
-                    notes = draft.notes
+                    draft.phone, draft.countryCode, draft.clientName, draft.serviceDescription,
+                    draft.assignedUserId, draft.date, draft.timeSlot, draft.price,
+                    draft.address, draft.city, draft.notes
                 )
             }.onSuccess { r ->
                 if (r.ok && r.appointment_id != null) {
                     state = state.copy(loading = false)
-                    loadToday()
-                    loadCalendar(state.month)
+                    loadToday(); loadCalendar(state.month)
                     onSuccess(r.appointment_id)
+                } else state = state.copy(loading = false, error = r.error ?: r.warning)
+            }.onFailure(::fail)
+        }
+    }
+
+    fun updateAppointment(id: Long, draft: ServiceDraft, onSuccess: (Long) -> Unit) {
+        if (state.user?.role != "admin") {
+            state = state.copy(error = "Solo el administrador puede editar servicios desde la app.")
+            return
+        }
+        state = state.copy(loading = true, error = null)
+        viewModelScope.launch {
+            runCatching {
+                api.updateAppointment(
+                    id, draft.phone, draft.countryCode, draft.clientName, draft.serviceDescription,
+                    draft.assignedUserId, draft.date, draft.timeSlot, draft.price,
+                    draft.address, draft.city, draft.notes
+                )
+            }.onSuccess { r ->
+                if (r.ok) {
+                    state = state.copy(loading = false)
+                    loadToday(); loadCalendar(state.month); loadAppointment(id)
+                    onSuccess(id)
                 } else state = state.copy(loading = false, error = r.error ?: r.warning)
             }.onFailure(::fail)
         }
